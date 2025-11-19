@@ -6,6 +6,7 @@ import os
 import faiss
 import gradio as gr
 from PIL import Image
+from collections import Counter
 
 # --- CONFIGURACIÓN DE RUTAS Y PARÁMETROS ---
 OUTPUT_DIR = 'data/processed'
@@ -108,6 +109,11 @@ def find_similar_images(input_img_pil):
     # Obtener las rutas correspondientes
     similar_image_paths = IMAGE_PATHS[result_indices]
 
+    # --- LÓGICA DE CLASIFICACIÓN POR VOTO MAYORITARIO (K-NN) ---
+    retrieved_breeds = [get_breed_from_path(path) for path in similar_image_paths]
+    breed_counts = Counter(retrieved_breeds)
+    predicted_breed = breed_counts.most_common(1)[0][0]
+
     results_list = []
     for i, path in enumerate(similar_image_paths):
         # D[0] contiene las distancias para la consulta
@@ -122,10 +128,21 @@ def find_similar_images(input_img_pil):
         
         img = Image.open(path).resize((224, 224))
         
-        results_list.append((img, f"Similitud: {score:.2f}"))
+        results_list.append((img, f"Similitud: {score:.2f} | path: {path}"))
 
-    return input_img_pil.resize((224, 224)), results_list
+    return input_img_pil.resize((224, 224)), results_list, f"Raza predicha: {predicted_breed}"
 
+
+# --- FUNCIÓN AUXILIAR PARA OBTENER LA RAZA ---
+
+def get_breed_from_path(path):
+    """
+    Extrae el nombre de la raza asumiendo que es el nombre
+    de la carpeta inmediatamente anterior al archivo.
+
+        Ejemplo: dataset/test/Golden Retriever/01.jpg -> Golden Retriever
+    """
+    return os.path.basename(os.path.dirname(path)).replace('_', ' ')
 
 # --- INTERFAZ GRADIO ---
 
@@ -146,6 +163,8 @@ if SYSTEM_READY:
             "Sube una imagen de un perro. El sistema usará ResNet50 y FAISS para encontrar las 10 imágenes más parecidas en el dataset."
         )
 
+        predicted_output = gr.Textbox(label="Clasificación por Voto Mayoritario (K=10)", value="Esperando consulta...", scale=1)
+
         with gr.Row():
             # Entrada
             input_image = gr.Image(type="pil", label="Imagen de Entrada (Consulta)", width=300)
@@ -165,7 +184,7 @@ if SYSTEM_READY:
         search_button.click(
             fn=find_similar_images,
             inputs=[input_image],
-            outputs=[input_display, gallery_output]
+            outputs=[input_display, gallery_output, predicted_output]
         )
         
     # Lanzar la aplicación
