@@ -7,29 +7,22 @@ import faiss
 import glob
 from collections import Counter
 
-# --- CONFIGURACIÓN ---
 OUTPUT_DIR = 'data/processed'
-INDEX_FILENAME = 'faiss_index.bin'
+INDEX_FILENAME = 'faiss_index_R50.bin'
 PATHS_FILENAME = 'image_paths.npy'
 
 FAISS_PATH = os.path.join(OUTPUT_DIR, INDEX_FILENAME)
 PATHS_PATH = os.path.join(OUTPUT_DIR, PATHS_FILENAME)
 
-# Parámetros de prueba
-# TEST_DATASET_PATH = 'dataset_test' # Carpeta con el conjunto de prueba
-TEST_DATASET_PATH = 'dataset/test' # Carpeta con el conjunto de prueba
-K_NDCG = 10 # Se evalúa la calidad del ranking hasta el puesto 10
-
-# --- FUNCIONES AUXILIARES ---
-
+TEST_DATASET_PATH = 'dataset/test' 
+# Se evalúa la calidad del ranking hasta el puesto 10
+K_NDCG = 10
 
 def load_and_preprocess_image(img_input, target_size=(224, 224)):
     """Pre-procesa una imagen para el modelo."""
     if isinstance(img_input, str):
-        # Si es una ruta (útil para la extracción inicial, no usado directamente en Gradio)
         img = image.load_img(img_input, target_size=target_size)
     else:
-        # Si es una imagen PIL (recibida de Gradio)
         img = img_input.resize(target_size)
 
     img_array = image.img_to_array(img)
@@ -44,9 +37,6 @@ def get_breed_from_path(path):
 
 def load_system():
     """Carga el modelo y el índice FAISS."""
-    # La función load_and_preprocess_image se omite aquí por brevedad, asume que está definida.
-    # Usaremos una versión simplificada de la carga de la interfaz.
-
     base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
     
     if not os.path.exists(FAISS_PATH) or not os.path.exists(PATHS_PATH):
@@ -61,14 +51,14 @@ def load_system():
 
 def calculate_ndcg(relevance_scores, k):
     """Calcula la métrica NDCG@k."""
-    # 1. Discounted Cumulative Gain (DCG)
+    # Discounted Cumulative Gain (DCG)
     dcg = 0.0
     for i in range(k):
         # Ganancia (G) = relevancia, Descuento = log2(i + 2)
         if i < len(relevance_scores):
             dcg += relevance_scores[i] / np.log2(i + 2)
     
-    # 2. Ideal Discounted Cumulative Gain (IDCG)
+    # Ideal Discounted Cumulative Gain (IDCG)
     # Para la NDCG, el IDCG se calcula ordenando las relevancias idealmente (descendente)
     ideal_scores = sorted(relevance_scores, reverse=True)
     idcg = 0.0
@@ -76,7 +66,7 @@ def calculate_ndcg(relevance_scores, k):
         if i < len(ideal_scores):
             idcg += ideal_scores[i] / np.log2(i + 2)
             
-    # 3. Normalization (NDCG)
+    # Normalización (NDCG)
     if idcg == 0:
         return 0.0
     return dcg / idcg
@@ -100,7 +90,7 @@ def evaluate_system():
     print(f"Comenzando la evaluación con {len(test_paths)} imágenes de prueba...")
     
     for i, test_path in enumerate(test_paths):
-        # 1. Preparar la imagen de consulta y extraer el embedding
+        # Preparar la imagen de consulta y extraer el embedding
         try:
             processed_img = load_and_preprocess_image(test_path)
             query_embedding = base_model.predict(processed_img, verbose=0).flatten().astype('float32')
@@ -109,14 +99,14 @@ def evaluate_system():
             print(f"Saltando imagen de prueba {test_path}: {e}")
             continue
 
-        # 2. Buscar K resultados
+        # Buscar K resultados
         # Buscamos K_NDCG + 1 para omitir la auto-imagen
         D, I = faiss_index.search(query_embedding, K_NDCG + 1)
         
-        # 3. Determinar la verdad fundamental (Ground Truth)
+        # Determinar la verdad fundamental (Ground Truth)
         true_breed = get_breed_from_path(test_path)
         
-        # 4. Procesar Resultados y Calcular Relevancia
+        # Procesar Resultados y Calcular Relevancia
         start_index = 0
         if D[0][0] < 1e-6:
             start_index = 1
@@ -142,26 +132,19 @@ def evaluate_system():
             relevance = 1 if retrieved_breed == true_breed else 0
             relevance_scores.append(relevance)
         
-        # 5. Calcular NDCG@10 para esta consulta
+        # Calcular NDCG@10 para esta consulta
         ndcg_k = calculate_ndcg(relevance_scores, K_NDCG)
         all_ndcgs.append(ndcg_k)
         
-        # print(f" {i+1}/{len(test_paths)}: {true_breed} -> NDCG@{K_NDCG}: {ndcg_k:.4f}")
-
-    # 6. Resultado Final
+    # Resultado Final
     if all_ndcgs:
         mean_ndcg = np.mean(all_ndcgs)
-        print("\n--- RESULTADOS DE LA EVALUACIÓN ---")
+        print("--- RESULTADOS DE LA EVALUACIÓN ---")
         print(f"Métrica: NDCG@{K_NDCG}")
         print(f"Número total de consultas de prueba: {len(all_ndcgs)}")
         print(f"NDCG Promedio del Sistema: {mean_ndcg:.4f}")
     else:
         print("No se pudo calcular el NDCG promedio. Verifica los datos de prueba.")
         
-if __name__ == "__main__":
-    # Necesitas la definición de load_and_preprocess_image del otro archivo aquí o importarla.
-    # Por simplicidad, se puede copiar/pegar la función load_and_preprocess_image aquí.
-    
-    # ... (Copiar la función load_and_preprocess_image del app_search.py aquí) ...
-    
+if __name__ == "__main__":    
     evaluate_system()

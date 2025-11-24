@@ -10,7 +10,7 @@ from collections import Counter
 
 # --- CONFIGURACIÓN DE RUTAS Y PARÁMETROS ---
 OUTPUT_DIR = 'data/processed'
-INDEX_FILENAME = 'faiss_index.bin'
+INDEX_FILENAME = 'faiss_index_R50.bin'
 PATHS_FILENAME = 'image_paths.npy'
 # Número de imágenes más similares a buscar
 K_SIMILAR = 10
