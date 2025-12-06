@@ -5,7 +5,6 @@ import numpy as np
 import os
 import faiss
 import glob
-from collections import Counter
 
 OUTPUT_DIR = 'data/processed'
 INDEX_FILENAME = 'faiss_index_R50.bin'
@@ -89,7 +88,7 @@ def evaluate_system():
 
     print(f"Comenzando la evaluación con {len(test_paths)} imágenes de prueba...")
     
-    for i, test_path in enumerate(test_paths):
+    for test_path in test_paths:
         # Preparar la imagen de consulta y extraer el embedding
         try:
             processed_img = load_and_preprocess_image(test_path)
