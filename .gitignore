@@ -1,6 +1,7 @@
 dataset
 runs/
 yolov8n.pt
+eval_gt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

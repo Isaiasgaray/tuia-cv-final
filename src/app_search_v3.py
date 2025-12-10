@@ -1,14 +1,16 @@
 from ultralytics import YOLO
 import os
 from PIL import ImageDraw
-from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
-from tensorflow.keras.preprocessing import image
 import numpy as np
 import os
 import faiss
 import gradio as gr
 from PIL import Image
 from collections import Counter
+
+import torch
+import torch.nn as nn
+from torchvision import models, transforms
 
 # --- Detector YOLO ---
 try:
@@ -64,35 +66,57 @@ def detect_bounding_boxes(
 # --- Clasificador por Similitud ---
 
 OUTPUT_DIR = 'data/processed'
-INDEX_R50_FILENAME = 'faiss_index_R50.bin'
+INDEX_R18_FILENAME = 'faiss_index_R18.bin'
 PATHS_FILENAME = 'image_paths.npy'
 K_SIMILAR = 10
 
-FAISS_PATH_R50 = os.path.join(OUTPUT_DIR, INDEX_R50_FILENAME)
+FAISS_PATH_R18 = os.path.join(OUTPUT_DIR, INDEX_R18_FILENAME)
 PATHS_PATH = os.path.join(OUTPUT_DIR, PATHS_FILENAME)
 
 MODELS = {} 
 FAISS_INDEXES = {}
 IMAGE_PATHS = None
 SYSTEM_READY = False
-MODEL_KEY = 'ResNet50'
+MODEL_KEY = 'ResNet18'
+WEIGHTS_R18_PATH = 'data/resnet18_70_breeds_best_weights.pth'
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def load_and_preprocess_image_keras(img_input, target_size=(224, 224)):
-    """Pre-procesa una imagen para el modelo Keras (ResNet50)."""
-    img = img_input.resize(target_size)
-    img_array = image.img_to_array(img)
-    img_array_expanded = np.expand_dims(img_array, axis=0)
-    return preprocess_input(img_array_expanded)
+def get_pytorch_transforms():
+    """Define las transformaciones estándar para el modelo PyTorch."""
+    return transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+
+def load_pytorch_resnet18(num_classes=70):
+    """Carga el ResNet18 de PyTorch con los pesos entrenados para feature extraction."""
+    if not os.path.exists(WEIGHTS_R18_PATH):
+        raise FileNotFoundError(f"CRÍTICO: Faltan pesos de PyTorch: {WEIGHTS_R18_PATH}")
+        
+    model = models.resnet18(weights=None)
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, num_classes)
+    
+    # Cargar los pesos entrenados
+    model.load_state_dict(torch.load(WEIGHTS_R18_PATH, map_location=DEVICE))
+    
+    model.fc = nn.Identity() 
+    model = model.to(DEVICE)
+    model.eval()
+    return model
 
 def get_breed_from_path(path):
     """Extrae el nombre de la raza."""
     return os.path.basename(os.path.dirname(path)).replace('_', ' ')
 
 def initialize_search_system():
-    """Carga solo ResNet50 y su índice FAISS."""
+    """Carga solo ResNet18 y su índice FAISS."""
     global MODELS, FAISS_INDEXES, IMAGE_PATHS, SYSTEM_READY
     
-    print("Iniciando el sistema de búsqueda (Solo ResNet50)...")
+    print("Iniciando el sistema de búsqueda...")
     SYSTEM_READY = False
     
     if not os.path.exists(PATHS_PATH):
@@ -101,19 +125,19 @@ def initialize_search_system():
     IMAGE_PATHS = np.load(PATHS_PATH)
     
     try:
-        print("Intentando cargar ResNet50 de Keras...")
-        if not os.path.exists(FAISS_PATH_R50):
-            print(f"FALLO CRÍTICO: Faltan índices FAISS R50: {FAISS_PATH_R50}.")
+        print("Intentando cargar ResNet18...")
+        if not os.path.exists(FAISS_PATH_R18):
+            print(f"FALLO CRÍTICO: Faltan índices FAISS R18: {FAISS_PATH_R18}.")
         else:
-            MODELS[MODEL_KEY] = ResNet50(weights='imagenet', include_top=False, pooling='avg')
-            FAISS_INDEXES[MODEL_KEY] = faiss.read_index(FAISS_PATH_R50)
-            print("✅ Modelo ResNet50 cargado exitosamente.")
+            MODELS['ResNet18'] = load_pytorch_resnet18()
+            FAISS_INDEXES['ResNet18'] = faiss.read_index(FAISS_PATH_R18)
+            print("✅ Modelo ResNet18 cargado exitosamente.")
         
     except Exception as e:
-        print(f"Falló la carga del Modelo ResNet50. Detalle: {e}")
+        print(f"Falló la carga del Modelo ResNet18. Detalle: {e}")
         
     if not MODELS:
-        print("Error: No se pudo cargar ResNet50.")
+        print("Error: No se pudo cargar ResNet18.")
         return
 
     print(f"Sistema inicializado. {len(MODELS)} modelos disponibles: {list(MODELS.keys())}.")
@@ -122,20 +146,30 @@ def initialize_search_system():
 initialize_search_system()
 
 def get_embedding(model_key, input_img_pil):
-    """Extrae el vector de features usando el modelo ResNet50 (Keras)."""
+    """Extrae el vector de features usando el modelo ResNet18."""
     if model_key != MODEL_KEY:
         raise ValueError(f"Modelo {model_key} no soportado. Solo se soporta {MODEL_KEY}.")
 
     model = MODELS[MODEL_KEY]
     
-    processed_img = load_and_preprocess_image_keras(input_img_pil)
-    embedding = model.predict(processed_img, verbose=0).flatten().astype('float32')
+    preprocess = get_pytorch_transforms()
+    input_tensor = preprocess(input_img_pil).unsqueeze(0).to(DEVICE)
+    
+    with torch.no_grad():
+        output = model(input_tensor)
+    
+    embedding = output.cpu().numpy().astype('float32')
+    
+    if embedding.ndim == 1:
+        embedding = np.expand_dims(embedding, axis=0)
+    elif embedding.ndim > 2 or embedding.shape[0] != 1:
+        embedding = embedding.flatten().reshape(1, -1)
         
-    return np.expand_dims(embedding, axis=0)
+    return embedding
 
 def classify_dog_breed(cropped_img_pil):
     """
-    Clasifica un perro recortado utilizando el modelo ResNet50 de búsqueda por similitud.
+    Clasifica un perro recortado utilizando el modelo ResNet18 de búsqueda por similitud.
     """
     if not SYSTEM_READY or MODEL_KEY not in MODELS:
         return "ERROR: Sistema no inicializado.", None
@@ -166,7 +200,7 @@ def integrated_detection_and_classification(input_image_pil):
     Flujo de trabajo completo:
     1. Detecta bounding boxes de perros.
     2. Recorta cada perro detectado.
-    3. Clasifica la raza de cada recorte (usando ResNet50 por defecto).
+    3. Clasifica la raza de cada recorte.
     4. Dibuja los boxes y etiquetas sobre la imagen original.
     """
     if not SYSTEM_READY or MODEL_KEY not in MODELS:
@@ -187,7 +221,7 @@ def integrated_detection_and_classification(input_image_pil):
     draw = ImageDraw.Draw(img_draw)
 
     processed_results = []
-    
+
     # 2. y 3. Recorte y Clasificación
     for i, det in enumerate(detections):
         x1, y1, x2, y2 = det['box']
@@ -241,10 +275,10 @@ if SYSTEM_READY and YOLO_MODEL is not None:
         height=450
     )
     
-    with gr.Blocks(title="Clasificador Integrado (YOLO + ResNet50)") as app:
+    with gr.Blocks(title="Clasificador Integrado (YOLO + ResNet18)") as app:
         gr.Markdown(
             f"# 🐕 Clasificador Integrado de Razas de Perro (YOLO + {MODEL_KEY})\n"
-            "El sistema detecta perros, recorta la imagen y clasifica la raza usando **ResNet50**."
+            "El sistema detecta perros, recorta la imagen y clasifica la raza usando **ResNet18**."
         )
 
         predicted_output = gr.Textbox(

@@ -1,0 +1,10 @@
+0,German Sheperd
+1,Border Collie
+2,Golden Retriever
+3,Boxer
+4,Corgi
+5,Dalmation
+6,Chihuahua
+7,Pug
+8,Beagle
+9,Cairn

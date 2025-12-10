@@ -145,5 +145,4 @@ def evaluate_system():
     else:
         print("No se pudo calcular el NDCG promedio. Verifica los datos de prueba.")
         
-if __name__ == "__main__":    
-    evaluate_system()
+evaluate_system()

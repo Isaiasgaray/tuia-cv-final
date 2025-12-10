@@ -173,15 +173,10 @@ def create_db_resnet18(image_paths):
 
 # --- main ---
 
-if __name__ == "__main__":
-    try:
-        all_paths = get_all_image_paths()
-        
-        create_db_resnet50(all_paths)
-        
-        create_db_resnet18(all_paths)
-        
-        print("Generación de bases completada.")
-        
-    except Exception as e:
-        print(f"Error: {e}")
+all_paths = get_all_image_paths()
+
+create_db_resnet50(all_paths)
+
+create_db_resnet18(all_paths)
+
+print("Generación de bases completada.")
