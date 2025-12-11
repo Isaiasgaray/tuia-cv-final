@@ -2,6 +2,8 @@
 
 Trabajo práctico final para la materia Visión por computadora de la Tecnicatura Universitaria en Inteligencia Artificial
 
+[Reporte en pdf](https://docs.google.com/document/d/1N6PK6Dmuuyz6sk525XnxeJrYUrgw32_PsjrAL4Cz8DI/edit?usp=sharing)
+
 # Requisitos
 
 - Python 3.10 o superior
@@ -38,4 +40,10 @@ Versión de la etapa 2 con selector de modelo
 
 ```sh
 $ python src/app_search_v2.py
+```
+
+Versión de la etapa 3 con detector YOLO
+
+```sh
+$ python src/app_search_v3.py
 ```
